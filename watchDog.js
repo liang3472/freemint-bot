@@ -130,7 +130,7 @@ class WatchDog {
     console.log('OS上的信息:', address);
     return await this.instance.get(`https://api.opensea.io/api/v1/asset_contract/${address}`).then(data => {
       return data.data || {};
-    }).catch(err=>{
+    }).catch(err => {
       that.sendMsg('查询opensea接口异常');
       return {};
     });
@@ -192,6 +192,17 @@ class WatchDog {
   }
 
   /**
+   * 获取参数个数,粗略计算参数个数
+   * @param {*} txData 
+   * @returns bool
+   */
+  getParamsNum(txData) {
+    const { input } = txData;
+    const paramsNum = Math.floor((input.length - 10) / 64);
+    return paramsNum;
+  }
+
+  /**
    * 获取methodId
    * @param {*} txData 
    * @returns string
@@ -216,7 +227,7 @@ class WatchDog {
     名称: ${osInfo?.collection?.name || '未知项目'}
     官网: ${osInfo?.collection?.external_link || '无官网信息'}
     合约address: ${data.to}
-    mint函数: Function ${data.methodName} 调用次数 ${data.count} 次
+    mint函数: Function ${data.methodName} 调用次数 ${data.count} 次, 参数个数 ${data.params}
     合约: https://etherscan.io/address/${data.to}#code
     OpenSea: ${osInfo?.collection?.slug ? `https://opensea.io/collection/${osInfo?.collection?.slug}` : '未知'}
     税点: ${osInfo?.seller_fee_basis_points ? `${osInfo.seller_fee_basis_points / 100}%` : '未知'}
@@ -233,7 +244,9 @@ class WatchDog {
       if (!error) {
         const { number } = blockHeader;
         const blockData = await web3.eth.getBlock(number);
-        if (blockData) {
+        // 添加锁控制，一个个区块控制，防止被api并发限制
+        if (blockData && !this.locked) {
+          this.locked = true;
           const { transactions } = blockData;
           // 达到了最大请求数,需要等待请求数降下来
           if (that.isFullQueryCount()) {
@@ -261,6 +274,7 @@ class WatchDog {
                 abis: old.abis,
                 methodName: old.methodName,
                 to: old.to,
+                params: old.params,
               });
               methodName = that.getMethodNameById(old.abis, methodId);
             } else {
@@ -277,15 +291,17 @@ class WatchDog {
                 abis,
                 methodName,
                 to,
+                params: that.getParamsNum(txData),
               });
             }
             that.showFuncName(methodName);
             console.log('疑似白嫖：', txData);
           }
+          this.locked = false;
         }
         return;
       }
-      
+
       that.sendMsg('脚本异常....', error);
       console.error(error);
     });
